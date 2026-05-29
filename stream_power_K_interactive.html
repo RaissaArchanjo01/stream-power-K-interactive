@@ -1,0 +1,167 @@
+
+<h2 class="sr-only">Modelo de stream power interativo: efeito do parâmetro K na incisão fluvial</h2>
+<style>
+  .ctrl { display:flex; align-items:center; gap:10px; margin:8px 0; font-size:13px; color:var(--color-text-secondary); }
+  .ctrl label { min-width:130px; }
+  .ctrl input[type=range] { flex:1; }
+  .ctrl .val { min-width:52px; text-align:right; font-size:13px; font-weight:500; color:var(--color-text-primary); }
+  .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:14px 0 0; }
+  .card { background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:10px 12px; }
+  .card .lbl { font-size:11px; color:var(--color-text-secondary); margin-bottom:2px; }
+  .card .num { font-size:18px; font-weight:500; color:var(--color-text-primary); }
+  .rock-row { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 4px; }
+  .rock-btn { font-size:12px; padding:4px 10px; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-secondary); background:var(--color-background-primary); color:var(--color-text-secondary); cursor:pointer; transition:background 0.15s; }
+  .rock-btn.active { background:var(--color-background-info); color:var(--color-text-info); border-color:transparent; }
+</style>
+
+<div style="margin-bottom:10px;">
+  <div class="rock-row" id="rock-row"></div>
+  <div style="font-size:11px;color:var(--color-text-tertiary);margin-bottom:8px;">Selecione uma litologia ou ajuste manualmente</div>
+</div>
+
+<div class="ctrl"><label>K (erodibilidade)</label><input type="range" id="K" min="-8" max="-3" step="0.05" value="-5.5"><span class="val" id="Kv"></span></div>
+<div class="ctrl"><label>m (exp. área)</label><input type="range" id="m" min="0.3" max="0.7" step="0.05" value="0.5"><span class="val" id="mv">0.50</span></div>
+<div class="ctrl"><label>n (exp. declividade)</label><input type="range" id="n" min="0.7" max="1.5" step="0.05" value="1.0"><span class="val" id="nv">1.00</span></div>
+<div class="ctrl"><label>Área drenagem (km²)</label><input type="range" id="A" min="1" max="500" step="1" value="100"><span class="val" id="Av">100</span></div>
+<div class="ctrl"><label>Declividade (m/m)</label><input type="range" id="S" min="0.001" max="0.05" step="0.001" value="0.01"><span class="val" id="Sv">0.010</span></div>
+
+<div class="cards">
+  <div class="card"><div class="lbl">Incisão E (mm/ano)</div><div class="num" id="E_out">—</div></div>
+  <div class="card"><div class="lbl">¹⁰Be esperado (10³ át/g)</div><div class="num" id="be_out">—</div></div>
+  <div class="card"><div class="lbl">Tempo de equilíbrio (Ma)</div><div class="num" id="teq_out">—</div></div>
+</div>
+
+<svg width="100%" viewBox="0 0 680 220" id="chart-svg" style="margin-top:14px;">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <line x1="50" y1="10" x2="50" y2="185" stroke="var(--color-border-primary)" stroke-width="0.5" marker-end="url(#arr2)"/>
+  <line x1="50" y1="185" x2="650" y2="185" stroke="var(--color-border-primary)" stroke-width="0.5" marker-end="url(#arr2)"/>
+  <text class="ts" x="46" y="190" text-anchor="end" fill="var(--color-text-tertiary)">0</text>
+  <text class="ts" x="340" y="210" text-anchor="middle" fill="var(--color-text-secondary)">K (log escala) — variação por litologia</text>
+  <text class="ts" x="18" y="100" text-anchor="middle" fill="var(--color-text-secondary)">E (mm/a)</text>
+  <polyline id="curve" fill="none" stroke="#378ADD" stroke-width="2"/>
+  <circle id="dot" r="6" fill="#EF9F27" stroke="var(--color-background-primary)" stroke-width="2"/>
+  <text class="ts" id="dot-label" fill="#633806" text-anchor="middle"></text>
+</svg>
+<div style="font-size:11px;color:var(--color-text-tertiary);margin-top:2px;text-align:center;">Curva E × K para os valores de A, S, m, n definidos. Ponto laranja = posição atual.</div>
+
+<script>
+const rocks = [
+  {name:'Quartzito',  K:-6.5, color:'#185FA5'},
+  {name:'Granito',    K:-6.0, color:'#534AB7'},
+  {name:'Gnaisse',    K:-5.5, color:'#0F6E56'},
+  {name:'Calcário',   K:-5.0, color:'#854F0B'},
+  {name:'Folhelho',   K:-4.2, color:'#993C1D'},
+  {name:'Aluvião',    K:-3.5, color:'#A32D2D'},
+];
+
+const rr = document.getElementById('rock-row');
+rocks.forEach(r => {
+  const b = document.createElement('button');
+  b.className = 'rock-btn';
+  b.textContent = r.name;
+  b.onclick = () => {
+    document.getElementById('K').value = r.K;
+    document.querySelectorAll('.rock-btn').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    update();
+  };
+  rr.appendChild(b);
+});
+
+function getVals() {
+  return {
+    K: Math.pow(10, +document.getElementById('K').value),
+    m: +document.getElementById('m').value,
+    n: +document.getElementById('n').value,
+    A: +document.getElementById('A').value * 1e6,
+    S: +document.getElementById('S').value,
+    Klog: +document.getElementById('K').value
+  };
+}
+
+function calcE(K,m,n,A,S) {
+  return K * Math.pow(A,m) * Math.pow(S,n);
+}
+
+function beFromErosion(E_mmyr) {
+  const P0 = 4.5, lam = Math.log(2)/1.387e6, rho=2.7, Lam=160;
+  const E_cmyr = E_mmyr/10;
+  const N = P0/(lam + rho*E_cmyr/Lam);
+  return N/1000;
+}
+
+function update() {
+  const {K,m,n,A,S,Klog} = getVals();
+  document.getElementById('Kv').textContent = '10^'+Klog.toFixed(2);
+  document.getElementById('mv').textContent = m.toFixed(2);
+  document.getElementById('nv').textContent = n.toFixed(2);
+  document.getElementById('Av').textContent = Math.round(A/1e6);
+  document.getElementById('Sv').textContent = S.toFixed(3);
+
+  const E = calcE(K,m,n,A,S);
+  const E_mmyr = E*1000;
+  document.getElementById('E_out').textContent = E_mmyr < 0.001 ? '<0.001' : E_mmyr.toFixed(3);
+  document.getElementById('be_out').textContent = beFromErosion(E_mmyr).toFixed(1);
+  const teq = E_mmyr > 0 ? (1/(Math.log(2)/1.387e6)/1e6).toFixed(2) : '—';
+  document.getElementById('teq_out').textContent = typeof teq === 'string' ? teq : teq;
+
+  const svg = document.getElementById('chart-svg');
+  const W=600, H=175, x0=50, y0=10;
+  const Krange = [-8,-3];
+  const Evals = [];
+  for(let ki=-8; ki<=-3; ki+=0.05) {
+    const Kk = Math.pow(10,ki);
+    Evals.push({ki, E: calcE(Kk,m,n,A,S)*1000});
+  }
+  const maxE = Math.max(...Evals.map(v=>v.E), 0.001);
+  const toX = ki => x0 + (ki - Krange[0])/(Krange[1]-Krange[0]) * W;
+  const toY = e => y0 + H - Math.min(e/maxE, 1)*H;
+
+  const pts = Evals.map(v => toX(v.ki)+','+toY(v.E)).join(' ');
+  document.getElementById('curve').setAttribute('points', pts);
+
+  const cx = toX(Klog);
+  const cy = toY(E_mmyr);
+  document.getElementById('dot').setAttribute('cx', cx);
+  document.getElementById('dot').setAttribute('cy', cy);
+  const lbl = document.getElementById('dot-label');
+  lbl.setAttribute('x', cx);
+  lbl.setAttribute('y', Math.max(cy-12, y0+14));
+  lbl.textContent = E_mmyr.toFixed(3)+' mm/a';
+
+  const tickKs = [-8,-7,-6,-5,-4,-3];
+  const oldTicks = svg.querySelectorAll('.xtick');
+  oldTicks.forEach(t=>t.remove());
+  tickKs.forEach(ki => {
+    const tx = toX(ki);
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1',tx); line.setAttribute('y1',185);
+    line.setAttribute('x2',tx); line.setAttribute('y2',190);
+    line.setAttribute('stroke','var(--color-border-tertiary)');
+    line.setAttribute('stroke-width','0.5');
+    line.classList.add('xtick');
+    svg.appendChild(line);
+    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',tx); t.setAttribute('y',203);
+    t.setAttribute('text-anchor','middle');
+    t.setAttribute('class','ts');
+    t.setAttribute('fill','var(--color-text-tertiary)');
+    t.textContent = '10^'+ki;
+    t.classList.add('xtick');
+    svg.appendChild(t);
+  });
+}
+
+['K','m','n','A','S'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    document.querySelectorAll('.rock-btn').forEach(x=>x.classList.remove('active'));
+    update();
+  });
+});
+
+update();
+</script>
